@@ -40,8 +40,45 @@ jobs:
         path: ${{ env.OutputFolder }}
         retention-days: 1
 
+  export-freecad:
+    env:
+      FREECADVERSION: "1.1.1"
+      FreeCADFileName: "./mechanical/housing.FCStd"
+      OutputFolder: "./output"
+      PartType: "PartDesign::Body"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Fetch repository
+      uses: actions/checkout@v4
+    
+    - name: Prepare output directory
+      run: |
+        mkdir -p ${{ env.OutputFolder }}
+        cp -r ./mechanical ${{ env.OutputFolder }}
+        cp ./LICENSE ${{ env.OutputFolder }}
+
+    - name: Install FreeCAD
+      run: |
+          wget https://github.com/FreeCAD/FreeCAD/releases/download/${{ env.FREECADVERSION }}/FreeCAD_${{ env.FREECADVERSION }}-Linux-x86_64-py311.AppImage
+          chmod 0777 FreeCAD_${{ env.FREECADVERSION }}-Linux-x86_64-py311.AppImage
+          ./FreeCAD_${{ env.FREECADVERSION }}-Linux-x86_64-py311.AppImage --appimage-extract
+    - name: Get FreeCAD Export
+      run: |
+          git clone https://github.com/0x007E/pyfreecadexport.git
+    - name: Export STEP Files
+      run: |
+          ./squashfs-root/usr/bin/python ./pyfreecadexport/src/pyfreecadexport.py -f "${{ env.FreeCADFileName }}" -p "${{ env.PartType }}" -d "${{ env.OutputFolder }}" -e "step" -l "squashfs-root/usr/lib/"
+          ./squashfs-root/usr/bin/python ./pyfreecadexport/src/pyfreecadexport.py -f "${{ env.FreeCADFileName }}" -p "${{ env.PartType }}" -d "${{ env.OutputFolder }}" -e "stl" -l "squashfs-root/usr/lib/"
+    
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: freecad-export
+        path: ${{ env.OutputFolder }}
+        retention-days: 1
+
   create-release:
-    needs: [export-kicad]
+    needs: [export-kicad, export-freecad]
     runs-on: ubuntu-latest
     steps:
     - name: Create Release
@@ -139,5 +176,40 @@ jobs:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./artifact/kicad.zip
         asset_name: kicad.zip
+        asset_content_type: application/zip
+
+    - name: Download FreeCAD Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: freecad-export
+        path: ./artifact/freecad
+    - name: Display structure
+      run: ls -R ./artifact/freecad
+    - name: Create Compressed File
+      run: |
+        cp -r ./artifact/kicad/step ./artifact/freecad/pcb
+        cd ./artifact
+        tar -czvf ./freecad.tar.gz ./freecad
+        zip -r ./freecad.zip ./freecad
+        cd ..
+
+    - name: Upload FreeCAD Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifact/freecad.tar.gz
+        asset_name: freecad.tar.gz
+        asset_content_type: application/gzip
+    
+    - name: Upload FreeCAD Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifact/freecad.zip
+        asset_name: freecad.zip
         asset_content_type: application/zip
         
